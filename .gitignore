@@ -1,28 +1,29 @@
-# Default ignored files
-/shelf/
-/.idea/workspace.xml
-/static/predict/model/variables/variables.data-00000-of-00001
-/static/predict/tokenizer.json
-/static/train/**
-# Editor-based HTTP Client requests
-/httpRequests/
+# Виртуальные окружения и PDM
+.venv/
+__pypackages__/
+.pdm-python
+.pdm-build/
 
-/.git
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
 
-# Datasource local storage ignored files
-/dataSources/
-/dataSources.local.xml
+# Тесты и линтеры
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
 
-# Virtualenvs
-env/
-.cache/v/cache
-
-# Intellij IDEA based IDEs folder
-.idea/**
-
-#Unused files
-requirements1.txt
-
-/run.py
-/.idea/
-/app/views.py
+# Локальные настройки и данные
+.env
+*.local.env
+.idea/
+.vscode/
+*.db
+*.sqlite3
+models/

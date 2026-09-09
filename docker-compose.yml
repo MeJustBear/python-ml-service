@@ -1,6 +1,65 @@
-version: "3"
+name: mlwrap
+
 services:
-  application:
+  api:
     build: .
+    restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "${API_PORT:-8000}:8000"
+    environment:
+      MLWRAP_ENVIRONMENT: docker
+      MLWRAP_LOG_FORMAT: json
+      MLWRAP_LOG_LEVEL: ${MLWRAP_LOG_LEVEL:-INFO}
+      # Режим аутентификации выбирается здесь: none | basic | jwt
+      MLWRAP_AUTH_MODE: ${MLWRAP_AUTH_MODE:-none}
+      # JSON вида {"admin":"secret"}; обязателен для basic и jwt
+      MLWRAP_AUTH_USERS: ${MLWRAP_AUTH_USERS:-}
+      MLWRAP_JWT_SECRET: ${MLWRAP_JWT_SECRET:-change-me-in-production}
+      MLWRAP_DATABASE_URL: postgresql+asyncpg://mlwrap:mlwrap@postgres:5432/mlwrap
+      MLWRAP_PLUGIN_MODULES: ${MLWRAP_PLUGIN_MODULES:-}
+      MLWRAP_PRELOAD_MODELS: ${MLWRAP_PRELOAD_MODELS:-echo}
+      MLWRAP_PERSIST_PAYLOADS: ${MLWRAP_PERSIST_PAYLOADS:-false}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [mlwrap]
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mlwrap
+      POSTGRES_PASSWORD: mlwrap
+      POSTGRES_DB: mlwrap
+    ports:
+      # 5433 снаружи, чтобы не конфликтовать с локальным Postgres
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mlwrap -d mlwrap"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [mlwrap]
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=7d
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    depends_on: [api]
+    networks: [mlwrap]
+
+volumes:
+  postgres-data:
+  prometheus-data:
+
+networks:
+  mlwrap:

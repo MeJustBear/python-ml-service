@@ -1,183 +1,204 @@
-# Модель классификации новостей по категориям
+# mlwrap
 
-## API
-#### UPD
-Сейчас файлы модели доступны только на google drive.
+FastAPI-обёртка для быстрых тестов ML-моделей. Модель подключается тремя функциями —
+загрузка, инференс, сбор метрик, — которые регистрируются в реестре по имени модели.
+Эндпоинты, аутентификация, метрики Prometheus и журнал запусков в БД уже готовы.
 
-### Перед началом
-Поскольку в проекте используются файлы, сильно превышающие размер в 200МБ, на хосте обязательно должен быть установлен [git lfs](https://git-lfs.github.com/).
+Подробное описание архитектуры и принятых решений — в [docs/DESIGN.md](docs/DESIGN.md).
 
-### Сборка
-Клонируем репозиторий, собираем образ с помощью compose.
+## Быстрый старт
 
-```
-$ git lfs clone https://github.com/MeJustBear/ml-flask-test-task
-$ cd cd ml-flask-test-task/
-$ docker-compose up
+```bash
+pdm install                      # зависимости и сам пакет в .venv
+pdm install -G examples          # опционально: пример с scikit-learn
+pdm run mlwrap serve             # http://localhost:8000/docs
 ```
 
-### Запуск
+Проверка на встроенной эхо-модели:
 
-```
- $ docker run --name my-container -d -p 8080:8080 ml-flask-test-task
-```
-
-Если ничего не менялось в файле app/config.py, то контейнер запустится на [http://localhost:8000](http://localhost:8000)
-
-### Функции внутри
-Для обращения к функциям классификации, используются POST- и GET-запросы, где в параметрах передаются необходимые данные.
-
-classify_url будет вызвана при обращении к URL: /predictByUrl с помощью POST- или GET-запрса с параметром 'analyseURL'. Вернёт .json-файл, с названиями категорий и вероятностью, с которой текст относится к каждой из них. В случае неправильного обращения(некорректного имени параметра), будет возвращён пустой json.
-```
-@application.route('/predictByUrl', methods=['GET', 'POST'])
-def classify_url():  # put application's code here
-    data = request.form
-    if data:
-        data = data['analyseURL']
-        if data:
-            values = mp.predict_by_url()
-            return jsonify(values)
-        if data:
-            return jsonify({})    
-    else:
-        return jsonify({})
-```
-classify_text будет вызвана при обращении к URL: /predictByUrl с помощью POST-запрса с параметром 'analyseTEXT'. Вернёт .json-файл, с названиями категорий и вероятностью, с которой текст относится к каждой из них. В случае неправильного обращения(некорректного имени параметра), будет возвращён пустой json.
-```
-@application.route('/predictByText', methods=['POST'])
-def classify_text():  # put application's code here
-    data = request.form
-    if data:
-        data = data['analyseTEXT']
-        if data:
-            values = mp.predict_text()
-            return jsonify(values)
-        if data:
-            return jsonify({})    
-    else:
-        return jsonify({}))
+```bash
+curl -s localhost:8000/api/v1/models | jq
+curl -s -X POST localhost:8000/api/v1/models/echo/predict \
+     -H 'Content-Type: application/json' \
+     -d '{"text": "привет", "repeat": 2}' | jq
 ```
 
-Пример такого.json-файла. Для статьи про [новый супергеройский фильм](https://russian.rt.com/nopolitics/article/924183-vechnye-film-marvel)
-
-```
+```json
 {
-"Без политики": 50.7047,
-"Бывший СССР": 0.0,
-"Мероприятия RT" 0.0,
-"Мир": 0.0,
-"Наука": 49.2952,
-"Новости партнёров": 0.0,
-"Пресс-релизы": 0.0,
-"Россия": 0.0,
-"Спорт": 0.0,
-"Экономика": 0.0 %
+  "model": "echo",
+  "version": "1.0.0",
+  "latency_ms": 0.167,
+  "request_id": "0a8011dd72e94bb183d9606f063b4105",
+  "result": { "text": "приветпривет", "length": 12, "calls": 1 }
 }
 ```
 
-## Модель
-Перед началом обучения, необходимо "очистить данные". В данном случае, все новые абзаци обозначаются латинской "n" после знака окончания предложения, а также между двумя "n", заключаются цитаты.
-Для очищения обучающих данных использовали 2 регулярных выражения.
+## Как подключить свою модель
 
-```(python)
-regex_cite = re.compile(r'[n](?P<word>[^n]+)[n]')
-regex_par = re.compile(r'(?P<sign>[.;])[n](?P<word>[\S]+)')
-for i in range(len(texts)):
-  texts[i] = re.sub(regex_cite, r' \g<word> ', re.sub(regex_par, r'\g<sign> \g<word> ', texts[i]))
+Создайте модуль и опишите функции — схемы запроса и ответа берутся из аннотаций,
+поэтому в Swagger сразу появится нормальная форма запроса.
+
+```python
+# mymodels/ranker.py
+from typing import Any
+
+import joblib
+from pydantic import BaseModel
+
+from mlwrap.registry import registry
+
+
+class RankRequest(BaseModel):
+    query: str
+    limit: int = 10
+
+
+class RankResponse(BaseModel):
+    items: list[str]
+    scores: list[float]
+
+
+@registry.loader("ranker", version="1.2.0", description="ранжирование выдачи")
+def load(config: dict[str, Any]) -> Any:
+    return joblib.load(config["path"])
+
+
+@registry.predictor("ranker")
+def predict(model: Any, payload: RankRequest) -> RankResponse:
+    items, scores = model.rank(payload.query, payload.limit)
+    return RankResponse(items=items, scores=scores)
+
+
+@registry.metrics("ranker")
+def metrics(model: Any) -> dict[str, float]:
+    return {"index_size": float(model.index_size)}
 ```
 
-Для представления слов в удобной для нейросети форме, используется класс из пакета препроцессинга keras.
+Запуск с этой моделью:
 
-```(python)
-from tensorflow.keras.preprocessing.text import Tokenizer
-tokenizer = Tokenizer(num_words=maxWordsCount, filters='«»!"#$%&()*+,-./:;<=>?@[\\]^_`{|}~\t\n', lower=True, split=' ', oov_token='unknown', char_level=False)
+```bash
+MLWRAP_MODELS_CONFIG='{"ranker": {"path": "/models/ranker.joblib"}}' \
+pdm run mlwrap serve --plugin mymodels.ranker --preload ranker
 ```
 
-Каждому слову присвается его уникальный номер.
+Что важно знать:
 
-```(python)
-tokenizer.fit_on_texts(texts)
+- обязателен только `predictor`; без `loader` модель считается всегда готовой;
+- функции могут быть `def` или `async def` — синхронные выполняются в пуле потоков;
+- `loader` принимает 0 или 1 аргумент (конфиг модели из `MLWRAP_MODELS_CONFIG`);
+- есть и императивный вариант: `registry.register("name", predict=..., load=...)`.
+
+## Эндпоинты
+
+| Метод | Путь | Назначение |
+|---|---|---|
+| GET | `/` | информация о сервисе |
+| GET | `/health/live`, `/health/ready` | живость и готовность (включая БД и упавшие модели) |
+| GET | `/metrics` | метрики Prometheus |
+| POST | `/api/v1/auth/token` | выдача JWT (только в режиме `jwt`) |
+| GET | `/api/v1/auth/me` | текущий субъект |
+| GET | `/api/v1/models` | список моделей и их состояние |
+| GET | `/api/v1/models/{name}` | карточка модели |
+| GET | `/api/v1/models/{name}/schema` | JSON Schema запроса и ответа |
+| POST | `/api/v1/models/{name}/load` | загрузка (`?force=true` — перезагрузка) |
+| POST | `/api/v1/models/{name}/unload` | выгрузка |
+| POST | `/api/v1/models/{name}/predict` | инференс |
+| POST | `/api/v1/models/{name}/predict/batch` | пакетный инференс |
+| GET | `/api/v1/models/{name}/metrics` | метрики модели: рантайм, пользовательские, агрегаты из БД |
+
+Для моделей, известных на старте, дополнительно генерируются типизированные роуты по тем же
+путям — они и попадают в OpenAPI с реальными схемами. Модели, зарегистрированные позже,
+обслуживает общий роут со свободным JSON.
+
+## Аутентификация
+
+Режим выбирается при запуске одним флагом:
+
+```bash
+mlwrap serve --auth none
+mlwrap serve --auth basic --user admin:secret
+mlwrap serve --auth jwt --user admin:secret --jwt-secret "$(openssl rand -hex 32)"
 ```
 
-Используется полносвязная модель. 
+Получить токен и сходить с ним:
 
-```(python)
-modelE = Sequential()
+```bash
+TOKEN=$(curl -s -X POST localhost:8000/api/v1/auth/token \
+        -d 'username=admin&password=secret' | jq -r .access_token)
+curl -s -H "Authorization: Bearer $TOKEN" localhost:8000/api/v1/models
 ```
 
-Процесс обучения модели.
+Пароли можно хранить bcrypt-хешем: `mlwrap hash-password` выведет хеш, который кладётся
+в `MLWRAP_AUTH_USERS` вместо пароля. Если для `basic`/`jwt` не задан ни один пользователь,
+сервис не стартует.
 
-```(python)
-Epoch 1/10
-1699/1699 [==============================] - 196s 113ms/step - loss: 0.4772 - accuracy: 0.8589 - val_loss: 0.1426 - val_accuracy: 0.9581
-Epoch 2/10
-1699/1699 [==============================] - 194s 114ms/step - loss: 0.0369 - accuracy: 0.9899 - val_loss: 0.1419 - val_accuracy: 0.9666
-Epoch 3/10
-1699/1699 [==============================] - 193s 113ms/step - loss: 0.0235 - accuracy: 0.9938 - val_loss: 0.2275 - val_accuracy: 0.9540
-Epoch 4/10
-1699/1699 [==============================] - 194s 114ms/step - loss: 0.0294 - accuracy: 0.9920 - val_loss: 0.2066 - val_accuracy: 0.9576
-Epoch 5/10
-1699/1699 [==============================] - 193s 113ms/step - loss: 0.0208 - accuracy: 0.9939 - val_loss: 0.2059 - val_accuracy: 0.9691
-Epoch 6/10
-1699/1699 [==============================] - 194s 114ms/step - loss: 0.0157 - accuracy: 0.9956 - val_loss: 0.2400 - val_accuracy: 0.9651
-Epoch 7/10
-1699/1699 [==============================] - 193s 113ms/step - loss: 0.0167 - accuracy: 0.9956 - val_loss: 0.1790 - val_accuracy: 0.9670
-Epoch 8/10
-1699/1699 [==============================] - 194s 114ms/step - loss: 0.0135 - accuracy: 0.9959 - val_loss: 0.2037 - val_accuracy: 0.9677
-Epoch 9/10
-1699/1699 [==============================] - 194s 114ms/step - loss: 0.0118 - accuracy: 0.9966 - val_loss: 0.1964 - val_accuracy: 0.9693
-Epoch 10/10
-1699/1699 [==============================] - 194s 114ms/step - loss: 0.0102 - accuracy: 0.9971 - val_loss: 0.2094 - val_accuracy: 0.9687
+## Метрики
+
+`/metrics` отдаёт:
+
+- `mlwrap_predict_total{model,status}`, `mlwrap_predict_latency_seconds{model}`,
+  `mlwrap_predict_in_progress{model}`, `mlwrap_predict_batch_size{model}`;
+- `mlwrap_model_loaded{model}`, `mlwrap_model_load_duration_seconds{model}`,
+  `mlwrap_model_load_total{model,status}`;
+- `mlwrap_model_custom_metric{model,metric}` — то, что вернула функция `metrics` плагина;
+- `mlwrap_http_requests_total{method,path,status}`, `mlwrap_http_request_duration_seconds`.
+
+`GET /api/v1/models/{name}/metrics` дополнительно считает по журналу в БД количество вызовов,
+долю ошибок и перцентили задержки.
+
+## Docker
+
+```bash
+docker compose up --build
 ```
 
-![graph](https://user-images.githubusercontent.com/47248368/141210154-684d5dda-d5fd-4700-88a3-98089de2471b.png)
+Поднимутся три сервиса: `api` (8000), `postgres` (5433 снаружи) и `prometheus` (9090,
+скрейпит `api:8000/metrics`). Порты на хосте переопределяются переменными `API_PORT`,
+`POSTGRES_PORT`, `PROMETHEUS_PORT`. Миграции применяются в entrypoint перед стартом сервиса. Режим
+аутентификации и прочие параметры задаются переменными окружения — см. `docker-compose.yml`
+и `.env.example`:
 
-Параметры полученной нейросети.
-
-```(python)
-modelE.summary()
-
-Model: "sequential_5"
-_________________________________________________________________
-Layer (type)                 Output Shape              Param #   
-=================================================================
-embedding_5 (Embedding)      (None, 500, 200)          20000000  
-_________________________________________________________________
-spatial_dropout1d_1 (Spatial (None, 500, 200)          0         
-_________________________________________________________________
-flatten_1 (Flatten)          (None, 100000)            0         
-_________________________________________________________________
-batch_normalization_1 (Batch (None, 100000)            400000    
-_________________________________________________________________
-dense_1 (Dense)              (None, 1000)              100001000 
-_________________________________________________________________
-dropout (Dropout)            (None, 1000)              0         
-_________________________________________________________________
-batch_normalization_2 (Batch (None, 1000)              4000      
-_________________________________________________________________
-dense_2 (Dense)              (None, 10)                10010     
-=================================================================
-Total params: 120,415,010
-Trainable params: 120,213,010
-Non-trainable params: 202,000
-_________________________________________________________________
+```bash
+MLWRAP_AUTH_MODE=jwt MLWRAP_AUTH_USERS='{"admin":"secret"}' \
+MLWRAP_JWT_SECRET="$(openssl rand -hex 32)" docker compose up --build
 ```
 
-### Результаты тестов
+## Конфигурация
 
-Для каждой категории была сформирована валидационная выборка. Затем, модель определяла её категорию, после вычислялись частоты правильного предсказания для текстов из каждой категории. 
+Все настройки — переменные окружения с префиксом `MLWRAP_`, полный список с комментариями
+в [.env.example](.env.example). Часто нужные:
+
+| Переменная | По умолчанию | Значение |
+|---|---|---|
+| `MLWRAP_AUTH_MODE` | `none` | `none` / `basic` / `jwt` |
+| `MLWRAP_AUTH_USERS` | `{}` | `{"login": "пароль-или-bcrypt-хеш"}` |
+| `MLWRAP_JWT_SECRET` | — | секрет подписи токенов |
+| `MLWRAP_PLUGIN_MODULES` | `[]` | модули с моделями |
+| `MLWRAP_PRELOAD_MODELS` | `[]` | загрузить на старте |
+| `MLWRAP_AUTO_LOAD` | `true` | ленивая загрузка при первом запросе |
+| `MLWRAP_MODELS_CONFIG` | `{}` | настройки на модель |
+| `MLWRAP_PREDICT_TIMEOUT_SECONDS` | `60` | таймаут инференса |
+| `MLWRAP_DATABASE_URL` | — | без него сервис работает без журнала |
+| `MLWRAP_PERSIST_PAYLOADS` | `false` | сохранять тела запросов и ответов |
+
+## CLI
 
 ```
-Статистика: 
-Тему: Без политики верно предсказывали в  99.326 % случаев
-Тему: Бывший СССР верно предсказывали в  99.208 % случаев
-Тему: Мероприятия RT верно предсказывали в  100.0 % случаев
-Тему: Мир верно предсказывали в  99.3 % случаев
-Тему: Наука верно предсказывали в  97.0 % случаев
-Тему: Новости партнёров верно предсказывали в  100.0 % случаев
-Тему: Пресс-релизы верно предсказывали в  100.0 % случаев
-Тему: Россия верно предсказывали в  98.997 % случаев
-Тему: Спорт верно предсказывали в  99.943 % случаев
-Тему: Экономика верно предсказывали в  97.491 % случаев
-Средняя точность составила:  99.1265 %
+mlwrap serve             запуск сервиса (--auth, --user, --plugin, --preload, --reload)
+mlwrap models            список зарегистрированных моделей
+mlwrap migrate           применить миграции Alembic
+mlwrap initdb            создать таблицы без Alembic
+mlwrap token SUBJECT     выпустить JWT для отладки
+mlwrap hash-password     bcrypt-хеш пароля
 ```
+
+## Разработка
+
+```bash
+pdm run test        # pytest
+pdm run lint        # ruff check
+pdm run fmt         # ruff format
+pdm run typecheck   # mypy
+```
+
+Тесты гоняются на SQLite (aiosqlite) и не требуют поднятой инфраструктуры.
