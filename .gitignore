@@ -19,6 +19,9 @@ dist/
 coverage.xml
 htmlcov/
 
+# Собранный сайт документации
+site/
+
 # Локальные настройки и данные
 .env
 *.local.env

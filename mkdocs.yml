@@ -1,0 +1,72 @@
+site_name: mlwrap
+site_description: FastAPI-обёртка для быстрого тестирования ML-моделей
+site_url: https://mejustbear.github.io/python-ml-service/
+repo_url: https://github.com/MeJustBear/python-ml-service
+repo_name: MeJustBear/python-ml-service
+edit_uri: edit/master/docs/
+
+docs_dir: docs
+site_dir: site
+
+theme:
+  name: material
+  language: ru
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.tracking
+    - content.code.copy
+    - content.action.edit
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Тёмная тема
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Светлая тема
+
+nav:
+  - Обзор: index.md
+  - Модули mlwrap: modules.md
+  - База данных: database.md
+  - Метрики Prometheus: metrics.md
+  - Проектный документ: DESIGN.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      # Дефолтный slugify выбрасывает кириллицу и превращает якоря в _2, _3.
+      # Этот повторяет поведение GitHub, поэтому ссылки работают и там, и на Pages.
+      slugify: !!python/object/apply:pymdownx.slugs.slugify {kwds: {case: lower}}
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        # Блоки ```mermaid рендерятся и здесь, и в обычном просмотре файлов на GitHub.
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+validation:
+  nav:
+    omitted_files: warn
+  links:
+    absolute_links: info
+    unrecognized_links: warn

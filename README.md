@@ -4,7 +4,17 @@ FastAPI-обёртка для быстрых тестов ML-моделей. М�
 загрузка, инференс, сбор метрик, — которые регистрируются в реестре по имени модели.
 Эндпоинты, аутентификация, метрики Prometheus и журнал запусков в БД уже готовы.
 
-Подробное описание архитектуры и принятых решений — в [docs/DESIGN.md](docs/DESIGN.md).
+**Справка по проекту: [mejustbear.github.io/python-ml-service](https://mejustbear.github.io/python-ml-service/)**
+— устройство модулей, схема БД и перечень метрик с диаграммами. Исходники справки лежат
+в [`docs/`](docs/):
+
+| Раздел | О чём |
+|---|---|
+| [Обзор](docs/index.md) | слои сервиса, путь одного запроса, уровни наблюдаемости |
+| [Модули mlwrap](docs/modules.md) | назначение пакетов, карта зависимостей, жизненный цикл модели |
+| [База данных](docs/database.md) | таблицы `inference_log` и `model_event`, связи, агрегаты |
+| [Метрики Prometheus](docs/metrics.md) | все коллекторы, метки, готовые PromQL-запросы |
+| [Проектный документ](docs/DESIGN.md) | основная идея, ключевые требования и границы проекта |
 
 ## Быстрый старт
 
@@ -146,6 +156,9 @@ curl -s -H "Authorization: Bearer $TOKEN" localhost:8000/api/v1/models
 `GET /api/v1/models/{name}/metrics` дополнительно считает по журналу в БД количество вызовов,
 долю ошибок и перцентили задержки.
 
+Полный перечень с метками, бакетами и готовыми PromQL-запросами — в
+[справке по метрикам](docs/metrics.md).
+
 ## Docker
 
 ```bash
@@ -202,3 +215,12 @@ pdm run typecheck   # mypy
 ```
 
 Тесты гоняются на SQLite (aiosqlite) и не требуют поднятой инфраструктуры.
+
+Документация собирается MkDocs Material и публикуется на GitHub Pages воркфлоу
+`.github/workflows/docs.yml` при пуше в `master`. Локально:
+
+```bash
+pdm install -G docs
+pdm run docs          # mkdocs serve на http://localhost:8000
+pdm run docs-build    # mkdocs build --strict
+```
